@@ -5,24 +5,23 @@ import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.Button;
-import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-import com.cellocator.nano.android.sdk.MultiSenseDeviceCallback;
 import com.cellocator.nano.android.sdk.MultiSenseManager;
 import com.cellocator.nano.android.sdk.MultiSenseObserver;
-import com.cellocator.nano.android.sdk.MultiSenseObserverCallback;
-import com.cellocator.nano.android.sdk.MultiSenseReadingLoggerStatus;
 import com.cellocator.nano.android.sdk.MultiSenseScanner;
-import com.cellocator.nano.android.sdk.model.MultiSenseDevice;
-import com.cellocator.nano.android.sdk.model.MultiSenseSensors;
+import com.cellocator.nano.android.sdk.model.MultiSenseConfiguration;
+import com.cellocator.nano.android.sdk.model.MultiSenseEnabledSensors;
+import com.cellocator.nano.android.sdk.model.MultiSenseSettings;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String TAG = "RIOT";
+    private static final String TAG = "MULTISENSE";
+
+    private boolean isScanning = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,72 +30,33 @@ public class MainActivity extends AppCompatActivity {
 
         checkLocationPermissions();
 
-        Button foreground = findViewById(R.id.foreground);
         Button scan = findViewById(R.id.scan);
 
         MultiSenseManager multiSenseManager = new MultiSenseManager(this);
         MultiSenseScanner multiSenseScanner = multiSenseManager.createScanner();
         MultiSenseObserver multiSenseObserver = multiSenseManager.createObserver();
 
-        foreground.setOnClickListener(v -> {
-            Log.i(TAG, "OBSERVING: " + multiSenseObserver.isObserving());
-            if (multiSenseObserver.isObserving()) {
-                multiSenseObserver.startForegroundMode();
-                Toast.makeText(this, "ForegroundService has started", Toast.LENGTH_LONG).show();
-            }
-        });
+        //Attempt to change beacon configuration
+        String macAddress = "48.1A.84.00.86.D6";
+        MultiSenseConfiguration multiSenseConfiguration = setUpDeviceConfiguration();
+        multiSenseObserver.saveConfiguration(macAddress, multiSenseConfiguration);
+        MultiSenseSettings multiSenseSettings = setUpMultiSenseSettings();
+        multiSenseObserver.saveSettings(macAddress, multiSenseSettings);
 
         scan.setOnClickListener(view -> {
-            Log.i(TAG, "SCANNING: " + multiSenseScanner.isScanning());
-            if (multiSenseScanner.isScanning()) {
+            if (isScanning) {
                 Log.i(TAG, "STOPPING SCAN");
                 multiSenseScanner.stopScan();
-                scan.setText("Start");
+                scan.setText("START");
             } else {
-                // Begin scanning
                 Log.i(TAG, "STARTING SCAN");
-                multiSenseScanner.scan(new MultiSenseDeviceCallback() {
-                    @Override
-                    public void onError(int errorType, String message) {
-                        Log.e(TAG, message != null ? message : "Unknown");
-                    }
-
-                    @Override
-                    public void onChange(MultiSenseDevice multiSenseDevice) {
-                        // Adding found device by mac address to observer
-                        multiSenseObserver.addTag(multiSenseDevice.getAddress());
-                    }
-                });
-
+                scan.setText("STOP");
+                // Begin scanning
+                multiSenseScanner.scan(new MultiSenseDeviceCallbackImpl(multiSenseObserver));
                 // Begin observing
-                multiSenseObserver.startObserveTags(new MultiSenseObserverCallback() {
-                    @Override
-                    public void onReadingLoggerStatusChange(String s, MultiSenseReadingLoggerStatus multiSenseReadingLoggerStatus) {
-                        Log.i(TAG, "STATUS: " + multiSenseReadingLoggerStatus.getStatus() + " (" + s + "): " + multiSenseReadingLoggerStatus.getPercent());
-                        if (multiSenseReadingLoggerStatus.getStatus().equals(MultiSenseReadingLoggerStatus.Status.SUCCESS)) {
-                            Log.i(TAG, "COMPLETED");
-                        }
-                    }
-
-                    @Override
-                    public void onError(int errorType, String message) {
-                        Log.e(TAG, message != null ? message : "");
-                    }
-
-                    @Override
-                    public void onChange(MultiSenseDevice multiSenseDevice) {
-                        // Reading device general info
-                        String mac = multiSenseDevice.getAddress();
-                        Log.i(TAG, mac);
-                        for (MultiSenseSensors sensorSample : multiSenseDevice.getSensors()) {
-                            String temp = sensorSample.getTemperature() != null ? sensorSample.getTemperature().toString() : " - ";
-                            Log.i(TAG, mac + ": " + temp);
-
-                        }
-                    }
-                });
-                scan.setText("Stop");
+                multiSenseObserver.startObserveTags(new MultiSenseObserverCallbackImpl());
             }
+            isScanning = !isScanning;
         });
     }
 
@@ -109,6 +69,46 @@ public class MainActivity extends AppCompatActivity {
                     Manifest.permission.ACCESS_FINE_LOCATION,
                     Manifest.permission.ACCESS_COARSE_LOCATION}, 1);
         }
+    }
 
+    private MultiSenseConfiguration setUpDeviceConfiguration() {
+        MultiSenseEnabledSensors enabledSensors = new MultiSenseEnabledSensors.Builder()
+                .setTemperature(true)
+                .setHumidity(true)
+                .setLight(true)
+                .setHallEffect(true)
+                .setHumidity(true)
+                .setAccelerometer(true)
+                .setLoggerEnabled(true)
+                .setPowerDown(true)
+                .setTxReason(true)
+                .create();
+
+        return new MultiSenseConfiguration.Builder()
+                .setSensorMask(enabledSensors)
+                //Beacon advertisement
+                .setProximityTimer(60)
+                //Stored data intervals
+                .setRelaxedTimer(60)
+                .setViolationTimer(60)
+                .setAlertTimer(2)
+                //THRESHOLDS
+                //Temperature
+                .setTempUpper(32)
+                .setTempLower(-18)
+                //Humidity
+                .setHumidityUpper(60)
+                .setHumidityLower(0)
+                //Light
+                .setLightThreshold(60)
+                //Impact
+                .setImpactThreshold(0.200f)
+                .create();
+    }
+
+    private MultiSenseSettings setUpMultiSenseSettings() {
+        return new MultiSenseSettings.Builder()
+                .setTransmissionPowerLevel(3)
+                .create();
     }
 }
